@@ -29,6 +29,36 @@
   strings.Fields()
   ```
 
+## strconv
+
+- 将 int 转换为 string
+
+  ```go
+  s := strconv.Itoa(i)
+  ```
+
+## sync
+
+- 等待一组goroutine完成后执行后面的代码，起到阻塞同步的作用（类似于Java的CountDownLatch）：
+
+  ```go
+  var wg sync.WaitGroup
+  wg.Add(1)//计数器加1，表示有一个 goroutine 需要等待完成
+  go func() {
+      defer wg.Done()//计数器减1,表示该 goroutine 已经完成
+      ...
+  }()
+  wg.Wait()//阻塞下面代码的执行，直到计数器归零
+  ...
+  ```
+
+- 确保某些操作在高并发的场景下只执行一次：
+
+  ```go
+  var loadOnce sync.Once
+  loadOnce.Do(func())
+  ```
+
 ## io
 
 - socket通信时，监听对端的消息并打印到控制台的简写：
@@ -45,19 +75,12 @@
   //}
   ```
 
-## sync
+## time
 
-- 等待一组goroutine完成后执行后面的代码，起到阻塞同步的作用（类似于Java的CountDownLatch）：
+- 延时功能：
 
   ```go
-  var wg sync.WaitGroup
-  wg.Add(1)//计数器加1，表示有一个 goroutine 需要等待完成
-  go func() {
-      defer wg.Done()//计数器减1,表示该 goroutine 已经完成
-      ...
-  }()
-  wg.Wait()//阻塞下面代码的执行，直到计数器归零
-  ...
+  <-time.After(2*time.Second)//启动2秒的定时器
   ```
 
 ## flag

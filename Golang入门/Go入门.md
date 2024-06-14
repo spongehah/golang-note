@@ -476,6 +476,25 @@ func TestForRangeGoRuntineDelayBidding() {
 
 以上结果预期为1，2，3，4，5，实际输出值为5，5，5，5，5。
 
+**怎么解决呢？**
+
+通过参数传递延迟读取的变量的值：改写如下：
+
+```go
+func TestForRangeGoRuntineDelayBidding() {
+   list := []int{1, 2, 3, 4, 5}
+   var wg sync.WaitGroup
+   for _, v := range list {
+      wg.Add(1)
+      go func(v int) {//通过参数传递
+         defer wg.Done()
+         fmt.Println(v)
+      }(v)
+   }
+   wg.Wait()
+}
+```
+
 ### 指针（引用传递）
 
 Go支持指针，在对函数的形参进行参数传递时，对于基本数据类型，我们可以**使用指针来进行引用传递**。
@@ -1490,7 +1509,7 @@ func main() {
 
 > 若 mian go 执行结束，那么 sub go 也会结束
 >
-> 注意事项：所有goroutine都是在for range循环完毕过后才开始执行
+> **注意事项：**所有goroutine都是在for range循环完毕过后才开始执行
 
 demo：
 
@@ -1552,6 +1571,35 @@ GMP：
 - 利用并行：通过设置 宏GOMAXPROCS 来限定 processor 的个数，即 CPU的使用核心数 / 最大并行数
 - 抢占：CPU 与 goroutine 的关系，也是类似于时间片的，当CPU对正在运行的goroutine的时间片用完过后，是会被其它goroutine抢占CPU的
 - 全局G队列：存放本地队列放不下的goroutine，processor可以从全局队列偷取goroutine
+
+#### runtime包
+
+- runtime.Gosched()：当前goroutine**让出CPU时间片**，重新等待安排任务
+- runtime.Goexit()：**退出**当前协程
+- runtime.GOMAXPROCS()：设置宏：设置goroutine的**并发数**
+
+#### Goroutine池
+
+worker pool（goroutine池）：
+
+- 本质上是生产者消费者模型
+- 可以有效控制goroutine数量，防止暴涨
+
+创建 pool 的demo：**其实就是写一个for循环去 开协程**
+
+```go
+// 创建工作池
+// 参数1：开几个协程
+func createPool(num int) {
+    // 根据开协程个数，去跑运行
+    for i := 0; i < num; i++ {
+        go func() {
+            // 执行任务
+            ...
+        }(
+    }
+}
+```
 
 ### Channel
 
@@ -1678,7 +1726,10 @@ default:
 }
 ```
 
-在一个select语句中，Go语言会按顺序从头至尾评估每一个发送和接收的语句。如果其中的任意一语句可以继续执行(即没有被阻塞)，那么就从那些可以执行的语句中任意选择一条来使用。如果没有任意一条语句可以执行(即所有的通道都被阻塞)，那么有两种可能的情况：
+- select可以同时监听一个或多个channel，直到其中一个channel ready
+- 如果多个channel同时ready，则随机选择一个执行
+
+在一个select语句中，Go语言会按顺序从头至尾评估每一个发送和接收的语句。如果其中的任意一语句可以继续执行(即没有被阻塞)，那么就从那些可以执行的语句中任意选择一条来使用。如果没有任意一条语句可以执行(即所有的通道**都被阻塞**)，那么有两种可能的情况：
 
 - 如果给出了default语句，那么就会执行default语句，同时程序的执行会从select语句后的语句中恢复。
 - 如果没有default语句，那么select语句将被阻塞，直到至少有一个通信可以进行下去。
@@ -1715,6 +1766,208 @@ func main() {
           return
        }
     }
+}
+```
+
+### sync包 和 atomic 包
+
+#### (读写)互斥锁
+
+互斥锁是一种常用的控制共享资源访问的方法，它能够保证同时只有一个goroutine可以访问共享资源。Go语言中使用sync包的Mutex类型来实现互斥锁。 
+
+```go
+var lock sync.Mutex
+lock.Lock()//上锁
+...
+lock.Unlock()//解锁
+```
+
+互斥锁是完全互斥的，但是有很多实际的场景下是读多写少的，当我们并发的去读取一个资源不涉及资源修改的时候是没有必要加锁的，这种场景下使用读写锁是更好的一种选择。读写锁在Go语言中使用sync包中的RWMutex类型。
+
+读写锁分为两种：读锁和写锁。当一个goroutine获取读锁之后，其他的goroutine如果是获取读锁会继续获得锁，如果是获取写锁就会等待；当一个goroutine获取写锁之后，其他的goroutine无论是获取读锁还是写锁都会等待。
+
+```go
+rwlock sync.RWMutex
+// rwlock.Lock() 			 // 加写锁
+rwlock.RLock()               // 加读锁
+...
+rwlock.RUnlock()             // 解读锁
+// rwlock.Unlock()           // 解写锁
+```
+
+#### sync.WaitGroup
+
+Go语言中可以使用sync.WaitGroup来实现并发任务的同步。 sync.WaitGroup有以下几个方法：
+
+| 方法名                          | 功能                |
+| ------------------------------- | ------------------- |
+| (wg * WaitGroup) Add(delta int) | 计数器+delta        |
+| (wg *WaitGroup) Done()          | 计数器-1            |
+| (wg *WaitGroup) Wait()          | 阻塞直到计数器变为0 |
+
+sync.WaitGroup内部维护着一个**计数器**，计数器的值可以增加和减少。例如当我们启动了N 个并发任务时，就将计数器值增加N。每个任务完成时通过调用Done()方法将计数器减1。通过调用Wait()来等待并发任务执行完，当**计数器值为0时，表示所有并发任务已经完成，然后才开始执行Wait之后的代码。**
+
+#### sync.Once
+
+在编程的很多场景下我们需要确保某些操作在高并发的场景下**只执行一次**，例如只加载一次配置文件、只关闭一次通道等。
+
+sync.Once只有一个Do方法，其签名如下：
+
+```go
+func (o *Once) Do(f func()) {}
+```
+
+注意：如果要执行的函数f需要**传递参数**就需要**搭配闭包**来使用。
+
+不用init的原因：init会增加程序的启动耗时，而且初始化的东西不一定能用上
+
+原理：**sync.Once其实内部包含一个互斥锁和一个布尔值**，互斥锁保证布尔值和数据的安全，而布尔值用来记录初始化是否完成。这样设计就能保证初始化操作的时候是并发安全的并且初始化操作也不会被执行多次。
+
+> **加载配置文件示例：**
+>
+> 延迟一个开销很大的初始化操作到真正用到它的时候再执行是一个很好的实践。因为预先初始化一个变量（比如在init函数中完成初始化）会增加程序的启动耗时，而且有可能实际执行过程中这个变量没有用上，那么这个初始化操作就不是必须要做的。我们来看一个例子：
+>
+> ```go
+> var icons map[string]image.Image
+> 
+> func loadIcons() {
+>     icons = map[string]image.Image{
+>         "left":  loadIcon("left.png"),
+>         "up":    loadIcon("up.png"),
+>         "right": loadIcon("right.png"),
+>         "down":  loadIcon("down.png"),
+>     }
+> }
+> 
+> // Icon 被多个goroutine调用时不是并发安全的
+> func Icon(name string) image.Image {
+>     if icons == nil {
+>         loadIcons()
+>     }
+>     return icons[name]
+> }
+> ```
+>
+> 多个goroutine并发调用Icon函数时不是并发安全的，现代的编译器和CPU可能会在保证每个goroutine都满足串行一致的基础上自由地重排访问内存的顺序。loadIcons函数可能会被**重排**为以下结果：
+>
+> ```go
+> func loadIcons() {
+>     icons = make(map[string]image.Image)
+>     icons["left"] = loadIcon("left.png")
+>     icons["up"] = loadIcon("up.png")
+>     icons["right"] = loadIcon("right.png")
+>     icons["down"] = loadIcon("down.png")
+> }
+> ```
+>
+> 在这种情况下就会出现即使判断了icons不是nil也不意味着变量初始化完成了（可能是只make完成）。考虑到这种情况，我们能想到的办法就是添加互斥锁，保证初始化icons的时候不会被其他的goroutine操作，但是这样做又会引发性能问题。
+>
+> 使用sync.Once改造的示例代码如下：
+>
+> ```go
+> var icons map[string]image.Image
+> 
+> var loadIconsOnce sync.Once
+> 
+> func loadIcons() {
+>     icons = map[string]image.Image{
+>         "left":  loadIcon("left.png"),
+>         "up":    loadIcon("up.png"),
+>         "right": loadIcon("right.png"),
+>         "down":  loadIcon("down.png"),
+>     }
+> }
+> 
+> // Icon 是并发安全的
+> func Icon(name string) image.Image {
+>     loadIconsOnce.Do(loadIcons)
+>     return icons[name]
+> }
+> ```
+>
+> **sync.Once其实内部包含一个互斥锁和一个布尔值**，互斥锁保证布尔值和数据的安全，而布尔值用来记录初始化是否完成。这样设计就能保证初始化操作的时候是并发安全的并且初始化操作也不会被执行多次。
+
+#### sync.Map
+
+Go语言中内置的map不是并发安全的。这种场景下就需要为map加锁来保证并发的安全性了，Go语言的sync包中提供了一个开箱即用的**并发安全版map：sync.Map**。开箱即用表示不用像内置的map一样使用make函数初始化就能直接使用。同时sync.Map内置了诸如Store、Load、LoadOrStore、Delete、Range等操作方法。
+
+demo：
+
+```go
+var m = sync.Map{}
+
+func main() {
+    wg := sync.WaitGroup{}
+    for i := 0; i < 20; i++ {
+        wg.Add(1)
+        go func(n int) {
+            key := strconv.Itoa(n)
+            m.Store(key, n)
+            value, _ := m.Load(key)
+            fmt.Printf("k=:%v,v:=%v\n", key, value)
+            wg.Done()
+        }(i)
+    }
+    wg.Wait()
+}
+```
+
+#### 原子操作
+
+代码中的**加锁操作因为涉及内核态的上下文切换会比较耗时、代价比较高**。针对**基本数据类型**我们还可以使用原子操作来保证并发安全，因为**原子操作**是Go语言提供的方法它在**用户态**就可以完成，因此**性能比加锁操作更好**。Go语言中原子操作由内置的标准库sync/atomic提供。
+
+atomic包提供了底层的原子级内存操作，对于同步算法的实现很有用。这些函数必须谨慎地保证正确使用。除了某些特殊的底层应用，使用通道或者sync包的函数/类型实现同步更好。
+
+**atomic包：**
+
+| 方法                                                         | 解释       |
+| :----------------------------------------------------------- | ---------- |
+| func LoadInt32(addr `*int32`) (val int32) <br/>func LoadInt64(addr `*int64`) (val int64)<br>func LoadUint32(addr`*uint32`) (val uint32)<br>func LoadUint64(addr`*uint64`) (val uint64)<br>func LoadUintptr(addr`*uintptr`) (val uintptr)<br>func LoadPointer(addr`*unsafe.Pointer`) (val unsafe.Pointer) | 读取操作   |
+| func StoreInt32(addr `*int32`, val int32) <br/>func StoreInt64(addr `*int64`, val int64) <br/>func StoreUint32(addr `*uint32`, val uint32) <br/>func StoreUint64(addr `*uint64`, val uint64) <br/>func StoreUintptr(addr `*uintptr`, val uintptr) <br/>func StorePointer(addr `*unsafe.Pointer`, val unsafe.Pointer) | 写入操作   |
+| func AddInt32(addr `*int32`, delta int32) (new int32) <br/>func AddInt64(addr `*int64`, delta int64) (new int64) <br/>func AddUint32(addr `*uint32`, delta uint32) (new uint32) <br/>func AddUint64(addr `*uint64`, delta uint64) (new uint64) <br/>func AddUintptr(addr `*uintptr`, delta uintptr) (new uintptr) | 修改操作   |
+| func SwapInt32(addr `*int32`, new int32) (old int32) <br/>func SwapInt64(addr `*int64`, new int64) (old int64) <br/>func SwapUint32(addr `*uint32`, new uint32) (old uint32) <br/>func SwapUint64(addr `*uint64`, new uint64) (old uint64)<br/>func SwapUintptr(addr `*uintptr`, new uintptr) (old uintptr)<br/>func SwapPointer(addr `*unsafe.Pointer`, new unsafe.Pointer) (old unsafe.Pointer) | 交换操作   |
+| func CompareAndSwapInt32(addr `*int32`, old, new int32) (swapped bool) <br/>func CompareAndSwapInt64(addr `*int64`, old, new int64) (swapped bool)<br/>func CompareAndSwapUint32(addr `*uint32`, old, new uint32) (swapped bool) <br/>func CompareAndSwapUint64(addr `*uint64`, old, new uint64) (swapped bool) <br/>func CompareAndSwapUintptr(addr `*uintptr`, old, new uintptr) (swapped bool) <br/>func CompareAndSwapPointer(addr `*unsafe.Pointer`, old, new unsafe.Pointer) (swapped bool) | 比较并交换 |
+
+demo：比较下互斥锁和原子操作的性能：
+
+```go
+var x int64
+var l sync.Mutex
+var wg sync.WaitGroup
+
+// 普通版加函数
+func add() {
+    // x = x + 1
+    x++ // 等价于上面的操作
+    wg.Done()
+}
+
+// 互斥锁版加函数
+func mutexAdd() {
+    l.Lock()
+    x++
+    l.Unlock()
+    wg.Done()
+}
+
+// 原子操作版加函数
+func atomicAdd() {
+    atomic.AddInt64(&x, 1)
+    wg.Done()
+}
+
+func main() {
+    start := time.Now()
+    for i := 0; i < 10000; i++ {
+        wg.Add(1)
+        // go add()       // 普通版add函数 不是并发安全的
+        // go mutexAdd()  // 加锁版add函数 是并发安全的，但是加锁性能开销大
+        go atomicAdd() // 原子操作版add函数 是并发安全，性能优于加锁版
+    }
+    wg.Wait()
+    end := time.Now()
+    fmt.Println(x)
+    fmt.Println(end.Sub(start))
 }
 ```
 
@@ -1804,27 +2057,36 @@ Go语言中的测试依赖`go test`命令。编写测试代码和编写普通的
 
 在`*_test.go`文件中有三种类型的函数，单元测试函数、基准测试函数和示例函数：
 
-| 类型     | 格式                  | 作用                           |
-| -------- | --------------------- | ------------------------------ |
-| 测试函数 | 函数名前缀为Test      | 测试程序的一些逻辑行为是否正确 |
-| 基准函数 | 函数名前缀为Benchmark | 测试函数的性能                 |
-| 示例函数 | 函数名前缀为Example   | 为文档提供示例文档             |
+| 类型     | 函数名格式            | 参数(必须为) | 作用                           |
+| -------- | --------------------- | ------------ | ------------------------------ |
+| 测试函数 | 函数名前缀为Test      | t *testing.T | 测试程序的一些逻辑行为是否正确 |
+| 基准函数 | 函数名前缀为Benchmark | b *testing.B | 测试函数的性能                 |
+| 示例函数 | 函数名前缀为Example   | 无           | 为文档提供示例文档             |
+
+> go test 命令的可携带参数：
+>
+> - 普通参数：
+>   - -v：查看所有测试函数名称和运行时间，若_test.go文件中有多个测试函数，不加 -v 只会输出一个汇总结果
+>   - -run="pattern"：函数名匹配上的测试函数才会被执行
+> - 基准测试参数：
+>   - -bench="pattern"：**基准测试并不会默认执行**，需要增加-bench参数，执行函数名匹配上的基准函数
+>   - -benchmem：获得内存分配的统计数据
+> - ...
+>
+> Golang 单元测试的具体用法见：[Golang单元测试](https://www.topgoer.com/%E5%87%BD%E6%95%B0/%E5%8D%95%E5%85%83%E6%B5%8B%E8%AF%95.html)
+>
+> 下面介绍三种单元测试函数的基本用法：
+
+#### 测试函数
 
 **单元测试对文件名、方法名、参数的限制：**
 
 1. 文件名必须以 xx**_test.go** 命名
-2. 方法必须是 **Test** 开头
+2. 测试函数函数名前缀为**Test**；
 3. 方法参数必须是 **t *testing.T**
 4. 使用 **go test** 执行单元测试
 
-> go test 命令的可携带参数：
->
-> - -v：查看所有测试函数名称和运行时间，若_test.go文件中有多个测试函数，不加 -v 只会输出一个汇总结果
-> - -run="pattern"：函数名匹配上的测试函数才会被执行
-
-
-
-demo：新建demo**_test.go**：
+测试函数demo：新建demo**_test.go**：
 
 ```go
 func TestDemo(t *testing.T) {
@@ -1834,6 +2096,87 @@ func TestDemo(t *testing.T) {
 ```
 
 使用 go test 命令运行单元测试
+
+#### 基准测试函数
+
+**基准测试对文件名、方法名、参数的限制：**
+
+1. 文件名必须以 xx**_test.go** 命名
+2. 测试函数函数名前缀为**Benchmark**；
+3. 方法参数必须是 **b *testing.B**
+4. 使用 **go test -bench="pattern"** 执行单元测试
+
+基准测试demo：
+
+```go
+func BenchmarkSplit(b *testing.B) {
+    fmt.Println("this is a bench test")
+    b.ResetTimer()	//形参b的方法之一：重置定时器
+}
+```
+
+通过 go test -bench="Split" [-benchmem]运行：运行结果：
+
+```
+split $ go test -bench=Split -benchmem
+goos: darwin
+goarch: amd64
+pkg: github.com/pprof/studygo/code_demo/test_demo/split
+BenchmarkSplit-8     10000000          215 ns/op         112 B/op          3 allocs/op
+PASS
+ok      github.com/spongehah/test_demo/split       2.394s
+```
+
+正常结果：
+BenchmarkSplit-8表示对Split函数进行基准测试，数字8表示GOMAXPROCS的值。
+10000000和203ns/op表示每次调用Split函数耗时203ns，这个结果是10000000次调用的平均值。
+[-benchmem]参数的打印结果：
+112 B/op表示每次操作内存分配了112字节，3 allocs/op则表示每次操作进行了3次内存分配
+
+#### 示例函数
+
+**示例函数对文件名、方法名、参数的限制：**
+
+1. 文件名必须以 xx**_test.go** 命名
+2. 测试函数函数名前缀为**Example**；
+3. 方法**Example**
+4. 使用 **go test -run Example** 执行单元测试
+
+**特点：**
+
+- 示例函数能够作为文档直接使用
+- 示例函数只要包含了// Output:也是可以通过go test运行的可执行测试。
+- 示例函数提供了可以直接运行的示例代码，可以直接在golang.org的godoc文档服务器上使用Go Playground运行示例代码。
+
+示例函数demo：
+
+```go
+func ExampleSplit() {
+    fmt.Println(split.Split("a:b:c", ":"))
+    fmt.Println(split.Split("枯藤老树昏鸦", "老"))
+    // Output:
+    // [a b c]
+    // [ 枯藤 树昏鸦]
+}
+```
+
+使用 go test -run Example 运行
+
+#### Setup与TearDown
+
+通过在`*_test.go`文件中定义`TestMain`函数来可以在测试之前进行额外的设置（`setup`）或在测试之后进行拆卸（`teardown`）操作。
+
+一个使用TestMain来设置Setup和TearDown的示例如下：
+
+```go
+func TestMain(m *testing.M) {
+    fmt.Println("write setup code here...") // 测试之前的做一些设置
+    // 如果 TestMain 使用了 flags，这里应该加上flag.Parse()
+    retCode := m.Run()                         // 执行测试
+    fmt.Println("write teardown code here...") // 测试之后做一些拆卸工作
+    os.Exit(retCode)                           // 退出测试
+}
+```
 
 ## 后续学习参考
 
