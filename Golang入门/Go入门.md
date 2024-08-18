@@ -405,6 +405,7 @@ func main() {
 1
 2
 3
+1
 ```
 
 上述代码有以下几个特征：
@@ -433,6 +434,15 @@ func DelayBidding() func() {
 func testDelayBidding() {
    DelayBidding()() // 实际值
 }
+
+func main() {
+	testDelayBidding()
+}
+```
+
+```
+输出结果：
+2
 ```
 
 **for range延迟绑定问题：**
@@ -666,7 +676,7 @@ func main() {
     test()
 }
 
-//输出：defer panic
+//输出：2defer panic
 ```
 
 
